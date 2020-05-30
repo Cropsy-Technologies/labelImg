@@ -7,6 +7,10 @@ import platform
 import re
 import sys
 import subprocess
+import numpy as np
+from PIL import Image, ImageEnhance
+from PIL.ImageQt import ImageQt
+import io
 
 from functools import partial
 from collections import defaultdict
@@ -15,6 +19,7 @@ try:
     from PyQt5.QtGui import *
     from PyQt5.QtCore import *
     from PyQt5.QtWidgets import *
+
 except ImportError:
     # needed for py3+qt4
     # Ref:
@@ -47,6 +52,8 @@ from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
 
 __appname__ = 'labelImg'
+
+brightnessFactor = 0
 
 class WindowMixin(object):
 
@@ -204,6 +211,12 @@ class MainWindow(QMainWindow, WindowMixin):
         quit = action(getStr('quit'), self.close,
                       'Ctrl+Q', 'quit', getStr('quitApp'))
 
+        incBrightness = action('&Increase Brightness', self.incBrightness,
+                      ']', 'incBrightness', None, enabled=False)
+
+        decBrightness = action('&Increase Brightness', self.decBrightness,
+                      '[', 'incBrightness', None, enabled=False)
+
         open = action(getStr('openFile'), self.openFile,
                       'Ctrl+O', 'open', getStr('openFileDetail'))
 
@@ -331,8 +344,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = struct(save=save, save_format=save_format, saveAs=saveAs, open=open, close=close, resetAll = resetAll,
-                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
-                              createMode=createMode, editMode=editMode, advancedMode=advancedMode,
+                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy, incBrightness = incBrightness,
+                              decBrightness= decBrightness, createMode=createMode, editMode=editMode, advancedMode=advancedMode,
                               shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
                               zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
                               fitWindow=fitWindow, fitWidth=fitWidth,
@@ -340,13 +353,13 @@ class MainWindow(QMainWindow, WindowMixin):
                               fileMenuActions=(
                                   open, opendir, save, saveAs, close, resetAll, quit),
                               beginner=(), advanced=(),
-                              editMenu=(edit, copy, delete,
+                              editMenu=(edit, copy, delete, incBrightness, decBrightness,
                                         None, color1, self.drawSquaresOption),
                               beginnerContext=(create, edit, copy, delete),
                               advancedContext=(createMode, editMode, edit, copy,
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
-                                  close, create, createMode, editMode),
+                                  close, create, createMode, editMode, incBrightness, decBrightness),
                               onShapesPresent=(saveAs, hideAll, showAll))
 
         self.menus = struct(
@@ -845,6 +858,41 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.labelList.item(i).setCheckState(0)
             else:
                 self.labelList.item(i).setCheckState(2)
+
+    def incBrightness(self):
+        if not self.image.isNull():
+            buf = QBuffer()
+            buf.open(QBuffer.ReadWrite)
+            self.image.save(buf, "BMP")
+            imgPIL = Image.open(io.BytesIO(buf.data()))
+            enhancer = ImageEnhance.Brightness(imgPIL)
+            # brightnessFactor = brightnessFactor + 1
+            imgPIL = enhancer.enhance(1.2)
+
+            # Convert back to QImage etc for displaying
+            imgPIL = imgPIL.convert("RGBA")
+            data = imgPIL.tobytes("raw", "RGBA")
+            qImg = QImage(data, imgPIL.size[0], imgPIL.size[1], QImage.Format_RGBA8888)
+            self.canvas.refreshPixmap(QPixmap.fromImage(qImg))
+            self.image = qImg
+            buf.close()
+
+    def decBrightness(self):
+        if not self.image.isNull():
+            buf = QBuffer()
+            buf.open(QBuffer.ReadWrite)
+            self.image.save(buf, "BMP")
+            imgPIL = Image.open(io.BytesIO(buf.data()))
+            enhancer = ImageEnhance.Brightness(imgPIL)
+            imgPIL = enhancer.enhance(0.83)
+
+            # Convert back to QImage etc for displaying
+            imgPIL = imgPIL.convert("RGBA")
+            data = imgPIL.tobytes("raw", "RGBA")
+            qImg = QImage(data, imgPIL.size[0], imgPIL.size[1], QImage.Format_RGBA8888)
+            self.canvas.refreshPixmap(QPixmap.fromImage(qImg))
+            self.image = qImg
+            buf.close()
 
     def labelSelectionChanged(self):
         item = self.currentItem()
