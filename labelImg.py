@@ -144,7 +144,7 @@ class MainWindow(QMainWindow, WindowMixin):
         listLayout.addWidget(self.diffcButton)
         listLayout.addWidget(useDefaultLabelContainer)
 
-        # Create and add combobox for showing unique labels in group 
+        # Create and add combobox for showing unique labels in group
         self.comboBox = ComboBox(self)
         listLayout.addWidget(self.comboBox)
 
@@ -159,7 +159,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.labelList.itemChanged.connect(self.labelItemChanged)
         listLayout.addWidget(self.labelList)
 
-        
+
 
         self.dock = QDockWidget(getStr('boxLabelText'), self)
         self.dock.setObjectName(getStr('labels'))
@@ -211,11 +211,17 @@ class MainWindow(QMainWindow, WindowMixin):
         quit = action(getStr('quit'), self.close,
                       'Ctrl+Q', 'quit', getStr('quitApp'))
 
-        incBrightness = action('&Increase Brightness', self.incBrightness,
-                      ']', 'incBrightness', None, enabled=False)
+        incBrightness = action('&Increase Brightness', partial(self.imgManipulate, "brightness", 1.2),
+                      '2', 'incBrightness', None, enabled=False)
 
-        decBrightness = action('&Increase Brightness', self.decBrightness,
-                      '[', 'incBrightness', None, enabled=False)
+        decBrightness = action('&Decrease Brightness', partial(self.imgManipulate, "brightness", 0.8),
+                      '1', 'decBrightness', None, enabled=False)
+
+        incContrast = action('&Increase Contrast', partial(self.imgManipulate, "contrast", 1.2),
+                               '4', 'incContrast', None, enabled=False)
+
+        decContrast = action('&Decrease Contrast', partial(self.imgManipulate, "contrast", 0.8),
+                               '3', 'decContrast', None, enabled=False)
 
         open = action(getStr('openFile'), self.openFile,
                       'Ctrl+O', 'open', getStr('openFileDetail'))
@@ -346,20 +352,20 @@ class MainWindow(QMainWindow, WindowMixin):
         self.actions = struct(save=save, save_format=save_format, saveAs=saveAs, open=open, close=close, resetAll = resetAll,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy, incBrightness = incBrightness,
                               decBrightness= decBrightness, createMode=createMode, editMode=editMode, advancedMode=advancedMode,
-                              shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
+                              incContrast = incContrast, decContrast = decContrast, shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
                               zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
                               fitWindow=fitWindow, fitWidth=fitWidth,
                               zoomActions=zoomActions,
                               fileMenuActions=(
                                   open, opendir, save, saveAs, close, resetAll, quit),
                               beginner=(), advanced=(),
-                              editMenu=(edit, copy, delete, incBrightness, decBrightness,
+                              editMenu=(edit, copy, delete, incBrightness, decBrightness, decContrast, incContrast,
                                         None, color1, self.drawSquaresOption),
                               beginnerContext=(create, edit, copy, delete),
                               advancedContext=(createMode, editMode, edit, copy,
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
-                                  close, create, createMode, editMode, incBrightness, decBrightness),
+                                  close, create, createMode, editMode, incBrightness, decBrightness, decContrast, incContrast),
                               onShapesPresent=(saveAs, hideAll, showAll))
 
         self.menus = struct(
@@ -800,7 +806,7 @@ class MainWindow(QMainWindow, WindowMixin):
     def updateComboBox(self):
         # Get the unique labels and add them to the Combobox.
         itemsTextList = [str(self.labelList.item(i).text()) for i in range(self.labelList.count())]
-            
+
         uniqueTextList = list(set(itemsTextList))
         # Add a null row for showing all the labels
         uniqueTextList.append("")
@@ -848,43 +854,32 @@ class MainWindow(QMainWindow, WindowMixin):
         self.addLabel(self.canvas.copySelectedShape())
         # fix copy and delete
         self.shapeSelectionChanged(True)
-    
+
     def comboSelectionChanged(self, index):
         text = self.comboBox.cb.itemText(index)
         for i in range(self.labelList.count()):
             if text == "":
-                self.labelList.item(i).setCheckState(2) 
+                self.labelList.item(i).setCheckState(2)
             elif text != self.labelList.item(i).text():
                 self.labelList.item(i).setCheckState(0)
             else:
                 self.labelList.item(i).setCheckState(2)
 
-    def incBrightness(self):
+    def imgManipulate(self, operation, val):
         if not self.image.isNull():
             buf = QBuffer()
             buf.open(QBuffer.ReadWrite)
             self.image.save(buf, "BMP")
             imgPIL = Image.open(io.BytesIO(buf.data()))
-            enhancer = ImageEnhance.Brightness(imgPIL)
+
+            if operation == "brightness":
+                enhancer = ImageEnhance.Brightness(imgPIL)
+
+            if operation == "contrast":
+                enhancer = ImageEnhance.Contrast(imgPIL)
+
             # brightnessFactor = brightnessFactor + 1
-            imgPIL = enhancer.enhance(1.2)
-
-            # Convert back to QImage etc for displaying
-            imgPIL = imgPIL.convert("RGBA")
-            data = imgPIL.tobytes("raw", "RGBA")
-            qImg = QImage(data, imgPIL.size[0], imgPIL.size[1], QImage.Format_RGBA8888)
-            self.canvas.refreshPixmap(QPixmap.fromImage(qImg))
-            self.image = qImg
-            buf.close()
-
-    def decBrightness(self):
-        if not self.image.isNull():
-            buf = QBuffer()
-            buf.open(QBuffer.ReadWrite)
-            self.image.save(buf, "BMP")
-            imgPIL = Image.open(io.BytesIO(buf.data()))
-            enhancer = ImageEnhance.Brightness(imgPIL)
-            imgPIL = enhancer.enhance(0.83)
+            imgPIL = enhancer.enhance(val)
 
             # Convert back to QImage etc for displaying
             imgPIL = imgPIL.convert("RGBA")
