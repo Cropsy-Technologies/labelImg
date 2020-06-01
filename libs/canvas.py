@@ -696,6 +696,10 @@ class Canvas(QWidget):
         self.shapes = []
         self.repaint()
 
+    def resetShapes(self):
+        self.shapes = []
+        self.repaint()
+
     def refreshPixmap(self, pixmap):
         self.pixmap = pixmap
         self.repaint()
