@@ -55,6 +55,7 @@ __appname__ = 'labelImg'
 
 brightness_factor = 1
 contrast_factor = 1
+gammaVal = 1
 
 class WindowMixin(object):
 
@@ -224,6 +225,12 @@ class MainWindow(QMainWindow, WindowMixin):
         decContrast = action('&Decrease Contrast', partial(self.imgManipulate, "contrast", -0.2),
                                '3', 'decContrast', None, enabled=False)
 
+        incGamma = action('&Increase Gamma', partial(self.imgManipulate, "gamma", 0.1),
+                               '6', 'incGamma', None, enabled=False)
+
+        decGamma = action('&Decrease Gamma', partial(self.imgManipulate, "gamma", -0.1),
+                               '5', 'decGamma', None, enabled=False)
+
         open = action(getStr('openFile'), self.openFile,
                       'Ctrl+O', 'open', getStr('openFileDetail'))
 
@@ -354,19 +361,19 @@ class MainWindow(QMainWindow, WindowMixin):
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy, incBrightness = incBrightness,
                               decBrightness= decBrightness, createMode=createMode, editMode=editMode, advancedMode=advancedMode,
                               incContrast = incContrast, decContrast = decContrast, shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
-                              zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
+                              incGamma=incGamma, decGamma=decGamma, zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
                               fitWindow=fitWindow, fitWidth=fitWidth,
                               zoomActions=zoomActions,
                               fileMenuActions=(
                                   open, opendir, save, saveAs, close, resetAll, quit),
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete, incBrightness, decBrightness, decContrast, incContrast,
-                                        None, color1, self.drawSquaresOption),
+                                        incGamma, decGamma, None, color1, self.drawSquaresOption),
                               beginnerContext=(create, edit, copy, delete),
                               advancedContext=(createMode, editMode, edit, copy,
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
-                                  close, create, createMode, editMode, incBrightness, decBrightness, decContrast, incContrast),
+                                  close, create, createMode, editMode, incBrightness, decBrightness, decContrast, incContrast, incGamma, decGamma),
                               onShapesPresent=(saveAs, hideAll, showAll))
 
         self.menus = struct(
@@ -876,11 +883,16 @@ class MainWindow(QMainWindow, WindowMixin):
 
             global brightness_factor
             global contrast_factor
+            global gammaVal
 
             if operation == "brightness":
-                brightness_factor+=val
+                brightness_factor += val
+
             if operation == "contrast":
-                contrast_factor+=val
+                contrast_factor += val
+
+            if operation == "gamma":
+                gammaVal += val
 
             # Brightness
             brightness_enhance = ImageEnhance.Brightness(imgPIL)
@@ -889,6 +901,11 @@ class MainWindow(QMainWindow, WindowMixin):
             # Contrast
             contrast_enhance = ImageEnhance.Contrast(imgPIL)
             imgPIL = contrast_enhance.enhance(contrast_factor)
+
+            # Gamma
+            if gammaVal <= 0:
+                gammaVal = 0.1
+            imgPIL = self.gammaAdjust(imgPIL, gammaVal)
 
             # Convert back to QImage etc for displaying
             imgPIL = imgPIL.convert("RGBA")
@@ -902,7 +919,10 @@ class MainWindow(QMainWindow, WindowMixin):
         gammaCorrect = 1/gamma
         newImg = 255.0 * (arr / 255.0)**gammaCorrect
 
-        return Image.fromarray(newImg)
+        formatted = (newImg * 255 / np.max(newImg)).astype('uint8')
+        print (gammaCorrect)
+        print (gammaVal)
+        return Image.fromarray(formatted)
 
     def labelSelectionChanged(self):
         item = self.currentItem()
