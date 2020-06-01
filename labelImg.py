@@ -236,6 +236,9 @@ class MainWindow(QMainWindow, WindowMixin):
         decGamma = action('&Decrease Gamma', partial(self.imgManipulate, "gamma", -0.1),
                                '5', 'decGamma', None, enabled=False)
 
+        delFile = action('&Delete File', self.deleteFile,
+                               'k', None, enabled=False)
+
         open = action(getStr('openFile'), self.openFile,
                       'Ctrl+O', 'open', getStr('openFileDetail'))
 
@@ -378,8 +381,8 @@ class MainWindow(QMainWindow, WindowMixin):
                               advancedContext=(createMode, editMode, edit, copy,
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
-                                  close, create, createMode, editMode, incBrightness, decBrightness, decContrast,toggleTransforms, incGamma, decGamma,
-                                  incContrast),
+                                  close, create, createMode, editMode, incBrightness, decBrightness, decContrast, toggleTransforms, incGamma, decGamma,
+                                  incContrast, delFile),
                               onShapesPresent=(saveAs, hideAll, showAll))
 
         self.menus = struct(
@@ -1445,6 +1448,21 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 return fullFilePath
         return ''
+
+    def deleteFile(self):
+
+        print(self.filePath)
+        print(self.currentPath())
+        print(self.defaultSaveDir)
+
+        # Populate the File menu dynamically.
+        self.updateFileMenu()
+
+        # Since loading the file may take some time, make sure it runs in the background.
+        if self.filePath and os.path.isdir(self.filePath):
+            self.queueEvent(partial(self.importDirImages, self.filePath or ""))
+        elif self.filePath:
+            self.queueEvent(partial(self.loadFile, self.filePath or ""))
 
     def _saveFile(self, annotationFilePath):
         if annotationFilePath and self.saveLabels(annotationFilePath):
