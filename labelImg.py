@@ -235,8 +235,9 @@ class MainWindow(QMainWindow, WindowMixin):
         decGamma = action('&Decrease Gamma', partial(self.imgManipulate, "gamma", -0.1),
                                '5', 'decGamma', None, enabled=False)
 
-        delFile = action('&Delete File', self.deleteFile,
-                               'k', None, enabled=False)
+        # delFile = action('&Delete File', self.deleteFile,
+        #                        'k', None, enabled=False)
+
         resetManipulations = action('&Reset Manipulations', self.resetManipulations,
                           'x', 'resetManipulations', None, enabled=False)
 
@@ -383,7 +384,7 @@ class MainWindow(QMainWindow, WindowMixin):
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
                                   close, create, createMode, editMode, incBrightness, decBrightness, decContrast,toggleTransforms, incGamma, decGamma,
-                                  incContrast, resetManipulations, delFile),
+                                  incContrast, resetManipulations),
                               onShapesPresent=(saveAs, hideAll, showAll))
 
         self.menus = struct(
@@ -1093,7 +1094,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.resetState()
         self.canvas.setEnabled(False)
         if filePath is None:
-            filePath = self.settings.get(SETTING_FILENAME)
+            filePath = self.settings.gedelFilet(SETTING_FILENAME)
 
         # Make sure that filePath is a regular python string, rather than QString
         filePath = ustr(filePath)
@@ -1147,6 +1148,7 @@ class MainWindow(QMainWindow, WindowMixin):
             #Todo: make this cleaner - Cropsy Edit
 
             self.imgManipulate("", 0)
+            self.canvas.shapes = []
             # self.canvas.loadPixmap(QPixmap.fromImage(image))
 
             if self.labelFile:
@@ -1462,10 +1464,12 @@ class MainWindow(QMainWindow, WindowMixin):
         return ''
 
     def deleteFile(self):
+        imgFileName = os.path.basename(self.filePath)
+        savedFileName = os.path.splitext(imgFileName)[0]
+        savedPath = os.path.join(ustr(self.defaultSaveDir), savedFileName)
 
-        print(self.filePath)
-        print(self.currentPath())
-        print(self.defaultSaveDir)
+        os.remove(imgFileName)
+        os.remove(savedPath)
 
         # Populate the File menu dynamically.
         self.updateFileMenu()
