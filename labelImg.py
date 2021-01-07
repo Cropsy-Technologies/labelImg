@@ -11,6 +11,8 @@ import numpy as np
 from PIL import Image, ImageEnhance
 from PIL.ImageQt import ImageQt
 import io
+import cv2
+import numpy
 
 from functools import partial
 from collections import defaultdict
@@ -54,6 +56,7 @@ from libs.hashableQListWidgetItem import HashableQListWidgetItem
 
 __appname__ = 'labelImg'
 
+
 class WindowMixin(object):
 
     def menu(self, title, actions=None):
@@ -87,7 +90,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Load string bundle for i18n
         self.stringBundle = StringBundle.getBundle()
-        getStr = lambda strId: self.stringBundle.getString(strId)
+        def getStr(strId): return self.stringBundle.getString(strId)
 
         # Save as Pascal voc xml
         self.defaultSaveDir = defaultSaveDir
@@ -163,7 +166,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.dock.setWidget(labelListContainer)
 
         self.fileListWidget = QListWidget()
-        self.fileListWidget.itemDoubleClicked.connect(self.fileitemDoubleClicked)
+        self.fileListWidget.itemDoubleClicked.connect(
+            self.fileitemDoubleClicked)
         filelistLayout = QVBoxLayout()
         filelistLayout.setContentsMargins(0, 0, 0, 0)
         filelistLayout.addWidget(self.fileListWidget)
@@ -178,7 +182,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.canvas = Canvas(parent=self)
         self.canvas.zoomRequest.connect(self.zoomRequest)
-        self.canvas.setDrawingShapeToSquare(settings.get(SETTING_DRAW_SQUARE, False))
+        self.canvas.setDrawingShapeToSquare(
+            settings.get(SETTING_DRAW_SQUARE, False))
 
         scroll = QScrollArea()
         scroll.setWidget(self.canvas)
@@ -207,6 +212,13 @@ class MainWindow(QMainWindow, WindowMixin):
         self.brightness_factor = 1
         self.contrast_factor = 1
         self.gammaVal = 1
+        self.hsv_hue_min = 0
+        self.hsv_hue_max = 255
+        self.hsv_sat_min = 0
+        self.hsv_sat_max = 255
+        self.hsv_val_min = 0
+        self.hsv_val_max = 255
+
         self.toggle_transform = True
 
         # Actions
@@ -230,16 +242,52 @@ class MainWindow(QMainWindow, WindowMixin):
                                   '`', 'toggleTransforms', None, enabled=False)
 
         incGamma = action('&Increase Gamma', partial(self.imgManipulate, "gamma", 0.1),
-                               '6', 'incGamma', None, enabled=False)
+                          '6', 'incGamma', None, enabled=False)
 
         decGamma = action('&Decrease Gamma', partial(self.imgManipulate, "gamma", -0.1),
-                               '5', 'decGamma', None, enabled=False)
+                          '5', 'decGamma', None, enabled=False)
+
+        incHueMin = action('&Increase Hue Min', partial(self.imgManipulate, "hsv_hue_min", 10),
+                           '7', 'incHueMin', None, enabled=False)
+
+        decHueMin = action('&Decrease Hue Min', partial(self.imgManipulate, "hsv_hue_min", -10),
+                           'Ctrl+7', 'decHueMin', None, enabled=False)
+
+        incHueMax = action('&Increase Hue Max', partial(self.imgManipulate, "hsv_hue_max", 10),
+                           '8', 'incHueMax', None, enabled=False)
+
+        decHueMax = action('&Decrease Hue Max', partial(self.imgManipulate, "hsv_hue_max", -10),
+                           'Ctrl+8', 'decHueMax', None, enabled=False)
+
+        incSatMin = action('&Increase Sat Min', partial(self.imgManipulate, "hsv_sat_min", 10),
+                           '9', 'incSatMin', None, enabled=False)
+
+        decSatMin = action('&Decrease Sat Min', partial(self.imgManipulate, "hsv_sat_min", -10),
+                           'Ctrl+9', 'decSatMin', None, enabled=False)
+
+        incSatMax = action('&Increase Sat Max', partial(self.imgManipulate, "hsv_sat_max", 10),
+                           '0', 'incSatMax', None, enabled=False)
+
+        decSatMax = action('&Decrease Sat Max', partial(self.imgManipulate, "hsv_sat_max", -10),
+                           'Ctrl+0', 'decSatMax', None, enabled=False)
+
+        incValMin = action('&Increase Val Min', partial(self.imgManipulate, "hsv_val_min", 10),
+                           '[', 'incValMin', None, enabled=False)
+
+        decValMin = action('&Decrease Val Min', partial(self.imgManipulate, "hsv_val_min", -10),
+                           'Ctrl+[', 'decValMin', None, enabled=False)
+
+        incValMax = action('&Increase Val Max', partial(self.imgManipulate, "hsv_val_max", 10),
+                           ']', 'incValMax', None, enabled=False)
+
+        decValMax = action('&Decrease Val Max', partial(self.imgManipulate, "hsv_val_max", -10),
+                           'Ctrl+]', 'decValMax', None, enabled=False)
 
         delFile = action('&Delete File', self.deleteFile,
-                               'v', 'delFile', None, enabled=False)
+                         'v', 'delFile', None, enabled=False)
 
         resetManipulations = action('&Reset Manipulations', self.resetManipulations,
-                          'x', 'resetManipulations', None, enabled=False)
+                                    'x', 'resetManipulations', None, enabled=False)
 
         open = action(getStr('openFile'), self.openFile,
                       'Ctrl+O', 'open', getStr('openFileDetail'))
@@ -271,9 +319,11 @@ class MainWindow(QMainWindow, WindowMixin):
         saveAs = action(getStr('saveAs'), self.saveFileAs,
                         'Ctrl+Shift+S', 'save-as', getStr('saveAsDetail'), enabled=False)
 
-        close = action(getStr('closeCur'), self.closeFile, 'Ctrl+W', 'close', getStr('closeCurDetail'))
+        close = action(getStr('closeCur'), self.closeFile,
+                       'Ctrl+W', 'close', getStr('closeCurDetail'))
 
-        resetAll = action(getStr('resetAll'), self.resetAll, None, 'resetall', getStr('resetAllDetail'))
+        resetAll = action(getStr('resetAll'), self.resetAll,
+                          None, 'resetall', getStr('resetAllDetail'))
 
         color1 = action(getStr('boxLineColor'), self.chooseColor1,
                         'Ctrl+L', 'color_line', getStr('boxLineColorDetail'))
@@ -292,7 +342,8 @@ class MainWindow(QMainWindow, WindowMixin):
                       enabled=False)
 
         advancedMode = action(getStr('advancedMode'), self.toggleAdvancedMode,
-                              'Ctrl+Shift+A', 'expert', getStr('advancedModeDetail'),
+                              'Ctrl+Shift+A', 'expert', getStr(
+                                  'advancedModeDetail'),
                               checkable=True)
 
         hideAll = action('&Hide\nRectBox', partial(self.togglePolygons, False),
@@ -302,8 +353,10 @@ class MainWindow(QMainWindow, WindowMixin):
                          'Ctrl+A', 'hide', getStr('showAllBoxDetail'),
                          enabled=False)
 
-        help = action(getStr('tutorial'), self.showTutorialDialog, None, 'help', getStr('tutorialDetail'))
-        showInfo = action(getStr('info'), self.showInfoDialog, None, 'help', getStr('info'))
+        help = action(getStr('tutorial'), self.showTutorialDialog,
+                      None, 'help', getStr('tutorialDetail'))
+        showInfo = action(getStr('info'), self.showInfoDialog,
+                          None, 'help', getStr('info'))
 
         zoom = QWidgetAction(self)
         zoom.setDefaultWidget(self.zoomWidget)
@@ -323,7 +376,8 @@ class MainWindow(QMainWindow, WindowMixin):
                            'Ctrl+F', 'fit-window', getStr('fitWinDetail'),
                            checkable=True, enabled=False)
         fitWidth = action(getStr('fitWidth'), self.setFitWidth,
-                          'Ctrl+Shift+F', 'fit-width', getStr('fitWidthDetail'),
+                          'Ctrl+Shift+F', 'fit-width', getStr(
+                              'fitWidthDetail'),
                           checkable=True, enabled=False)
         # Group zoom controls into a list for easier toggling.
         zoomActions = (self.zoomWidget, zoomIn, zoomOut,
@@ -363,28 +417,32 @@ class MainWindow(QMainWindow, WindowMixin):
         self.drawSquaresOption = QAction('Draw Squares', self)
         self.drawSquaresOption.setShortcut('Ctrl+Shift+R')
         self.drawSquaresOption.setCheckable(True)
-        self.drawSquaresOption.setChecked(settings.get(SETTING_DRAW_SQUARE, False))
+        self.drawSquaresOption.setChecked(
+            settings.get(SETTING_DRAW_SQUARE, False))
         self.drawSquaresOption.triggered.connect(self.toogleDrawSquare)
 
         # Store actions for further handling.
-        self.actions = struct(save=save, save_format=save_format, saveAs=saveAs, open=open, close=close, resetAll = resetAll,
-                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy, incBrightness = incBrightness,
-                              decBrightness= decBrightness, createMode=createMode, editMode=editMode, advancedMode=advancedMode,
-                              incContrast = incContrast, decContrast = decContrast, shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
-                              incGamma=incGamma, decGamma=decGamma, zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
+        self.actions = struct(save=save, save_format=save_format, saveAs=saveAs, open=open, close=close, resetAll=resetAll,
+                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy, incBrightness=incBrightness,
+                              decBrightness=decBrightness, createMode=createMode, editMode=editMode, advancedMode=advancedMode,
+                              incContrast=incContrast, decContrast=decContrast, shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
+                              incGamma=incGamma, decGamma=decGamma, incHueMin=incHueMin, decHueMin=decHueMin, incHueMax=incHueMax, decHueMax=decHueMax,
+                              incSatMin=incSatMin, decSatMin=decSatMin, incSatMax=incSatMax, decSatMax=decSatMax, incValMin=incValMin, decValMin=decValMin,
+                              incValMax=incValMax, decValMax=decValMax, zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
                               fitWindow=fitWindow, fitWidth=fitWidth, resetManipulations=resetManipulations,
                               zoomActions=zoomActions, toggleTransforms=toggleTransforms, delFile=delFile,
                               fileMenuActions=(
                                   open, opendir, save, saveAs, close, resetAll, quit),
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete, incBrightness, decBrightness, decContrast, incContrast, toggleTransforms,
-                                        incGamma, decGamma, resetManipulations, None, color1, delFile, self.drawSquaresOption),
+                                        incGamma, decGamma, incHueMin, decHueMin, incHueMax, decHueMax, incSatMin, decSatMin, incSatMax,
+                                        decSatMax, incValMin, decValMin, incValMax, decValMax, resetManipulations, None, color1, delFile, self.drawSquaresOption),
                               beginnerContext=(create, edit, copy, delete),
                               advancedContext=(createMode, editMode, edit, copy,
                                                delete, shapeLineColor, shapeFillColor),
                               onLoadActive=(
                                   close, create, createMode, editMode, incBrightness, decBrightness, decContrast, toggleTransforms, incGamma, decGamma,
-                                  incContrast, resetManipulations, delFile),
+                                  incContrast, incHueMin, decHueMin, incHueMax, decHueMax, incSatMin, decSatMin, incSatMax, decSatMax, incValMin, decValMin, incValMax, decValMax, resetManipulations, delFile),
                               onShapesPresent=(saveAs, hideAll, showAll))
 
         self.menus = struct(
@@ -403,13 +461,15 @@ class MainWindow(QMainWindow, WindowMixin):
         self.singleClassMode = QAction(getStr('singleClsMode'), self)
         self.singleClassMode.setShortcut("Ctrl+Shift+S")
         self.singleClassMode.setCheckable(True)
-        self.singleClassMode.setChecked(settings.get(SETTING_SINGLE_CLASS, False))
+        self.singleClassMode.setChecked(
+            settings.get(SETTING_SINGLE_CLASS, False))
         self.lastLabel = None
         # Add option to enable/disable labels being displayed at the top of bounding boxes
         self.displayLabelOption = QAction(getStr('displayLabel'), self)
         self.displayLabelOption.setShortcut("Ctrl+Shift+P")
         self.displayLabelOption.setCheckable(True)
-        self.displayLabelOption.setChecked(settings.get(SETTING_PAINT_LABEL, False))
+        self.displayLabelOption.setChecked(
+            settings.get(SETTING_PAINT_LABEL, False))
         self.displayLabelOption.triggered.connect(self.togglePaintLabelsOption)
 
         addActions(self.menus.file,
@@ -460,13 +520,14 @@ class MainWindow(QMainWindow, WindowMixin):
         # Add Chris
         self.difficult = False
 
-        ## Fix the compatible issue for qt4 and qt5. Convert the QStringList to python list
+        # Fix the compatible issue for qt4 and qt5. Convert the QStringList to python list
         if settings.get(SETTING_RECENT_FILES):
             if have_qstring():
                 recentFileQStringList = settings.get(SETTING_RECENT_FILES)
                 self.recentFiles = [ustr(i) for i in recentFileQStringList]
             else:
-                self.recentFiles = recentFileQStringList = settings.get(SETTING_RECENT_FILES)
+                self.recentFiles = recentFileQStringList = settings.get(
+                    SETTING_RECENT_FILES)
 
         size = settings.get(SETTING_WIN_SIZE, QSize(600, 500))
         position = QPoint(0, 0)
@@ -487,8 +548,10 @@ class MainWindow(QMainWindow, WindowMixin):
             self.statusBar().show()
 
         self.restoreState(settings.get(SETTING_WIN_STATE, QByteArray()))
-        Shape.line_color = self.lineColor = QColor(settings.get(SETTING_LINE_COLOR, DEFAULT_LINE_COLOR))
-        Shape.fill_color = self.fillColor = QColor(settings.get(SETTING_FILL_COLOR, DEFAULT_FILL_COLOR))
+        Shape.line_color = self.lineColor = QColor(
+            settings.get(SETTING_LINE_COLOR, DEFAULT_LINE_COLOR))
+        Shape.fill_color = self.fillColor = QColor(
+            settings.get(SETTING_FILL_COLOR, DEFAULT_FILL_COLOR))
         self.canvas.setDrawingColor(self.lineColor)
         # Add chris
         Shape.difficult = self.difficult
@@ -519,6 +582,10 @@ class MainWindow(QMainWindow, WindowMixin):
         # Display cursor coordinates at the right of status bar
         self.labelCoordinates = QLabel('')
         self.statusBar().addPermanentWidget(self.labelCoordinates)
+
+        # Display cursor coordinates at the right of status bar
+        self.imgProcValues = QLabel('')
+        self.statusBar().addPermanentWidget(self.imgProcValues)
 
         # Open Dir if deafult file
         if self.filePath and os.path.isdir(self.filePath):
@@ -623,6 +690,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.labelFile = None
         self.canvas.resetState()
         self.labelCoordinates.clear()
+        self.imgProcValues.clear()
         self.comboBox.cb.clear()
 
     def currentItem(self):
@@ -659,7 +727,8 @@ class MainWindow(QMainWindow, WindowMixin):
         subprocess.Popen(self.screencastViewer + [self.screencast])
 
     def showInfoDialog(self):
-        msg = u'Name:{0} \nApp Version:{1} \n{2} '.format(__appname__, __version__, sys.version_info)
+        msg = u'Name:{0} \nApp Version:{1} \n{2} '.format(
+            __appname__, __version__, sys.version_info)
         QMessageBox.information(self, u'Information', msg)
 
     def createShape(self):
@@ -755,7 +824,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 shape.difficult = difficult
                 self.setDirty()
             else:  # User probably changed item visibility
-                self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
+                self.canvas.setShapeVisible(
+                    shape, item.checkState() == Qt.Checked)
         except:
             pass
 
@@ -830,7 +900,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def updateComboBox(self):
         # Get the unique labels and add them to the Combobox.
-        itemsTextList = [str(self.labelList.item(i).text()) for i in range(self.labelList.count())]
+        itemsTextList = [str(self.labelList.item(i).text())
+                         for i in range(self.labelList.count())]
 
         uniqueTextList = list(set(itemsTextList))
         # Add a null row for showing all the labels
@@ -869,7 +940,8 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 self.labelFile.save(annotationFilePath, shapes, self.filePath, self.imageData,
                                     self.lineColor.getRgb(), self.fillColor.getRgb())
-            print('Image:{0} -> Annotation:{1}'.format(self.filePath, annotationFilePath))
+            print(
+                'Image:{0} -> Annotation:{1}'.format(self.filePath, annotationFilePath))
             return True
         except LabelFileError as e:
             self.errorMessage(u'Error saving label data', u'<b>%s</b>' % e)
@@ -895,11 +967,25 @@ class MainWindow(QMainWindow, WindowMixin):
         self.imgManipulate("", 0)
 
     def imgManipulate(self, operation, val):
+        def checkBoundary(change, val, min, max):
+            if(val + change <= min):
+                return min
+            if(val + change >= max):
+                return max
+            return val+change
+
         if not self.image.isNull():
             buf = QBuffer()
             buf.open(QBuffer.ReadWrite)
             self.image.save(buf, "BMP")
             imgPIL = Image.open(io.BytesIO(buf.data()))
+
+            # use numpy to convert the pil_image into a numpy array
+            numpy_image = numpy.array(imgPIL)
+
+            # convert to a openCV2 image, notice the COLOR_RGB2BGR which means that
+            # the color is converted from RGB to BGR format
+            opencv_image = cv2.cvtColor(numpy_image, cv2.COLOR_RGB2HSV)
 
             if operation == "brightness":
                 self.brightness_factor += val
@@ -907,11 +993,36 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.contrast_factor += val
             if operation == "gamma":
                 self.gammaVal += val
-
                 if self.gammaVal <= 0:
                     self.gammaVal = 0.1
+            if operation == "hsv_hue_min":
+                self.hsv_hue_min = checkBoundary(
+                    self.hsv_hue_min, val, 0, 255)
+            if operation == "hsv_hue_max":
+                self.hsv_hue_max = checkBoundary(
+                    self.hsv_hue_max, val, 0, 255)
+            if operation == "hsv_sat_min":
+                self.hsv_sat_min = checkBoundary(
+                    self.hsv_sat_min, val, 0, 255)
+            if operation == "hsv_sat_max":
+                self.hsv_sat_max = checkBoundary(
+                    self.hsv_sat_max, val, 0, 255)
+            if operation == "hsv_val_min":
+                self.hsv_val_min = checkBoundary(
+                    self.hsv_val_min, val, 0, 255)
+            if operation == "hsv_val_max":
+                self.hsv_val_max = checkBoundary(
+                    self.hsv_val_max, val, 0, 255)
 
             if self.toggle_transform:
+                # Thresholding
+                mask = cv2.inRange(opencv_image, (self.hsv_hue_min, self.hsv_sat_min,
+                                                  self.hsv_val_min), (self.hsv_hue_max, self.hsv_sat_max, self.hsv_val_max))
+
+                dst = cv2.bitwise_and(opencv_image, opencv_image, mask=mask)
+
+                imgPIL = Image.fromarray(cv2.cvtColor(dst, cv2.COLOR_HSV2RGB))
+
                 # Brightness
                 brightness_enhance = ImageEnhance.Brightness(imgPIL)
                 imgPIL = brightness_enhance.enhance(self.brightness_factor)
@@ -923,10 +1034,16 @@ class MainWindow(QMainWindow, WindowMixin):
                 # Gamma
                 imgPIL = self.gammaAdjust(imgPIL, self.gammaVal)
 
+            self.imgProcValues.setText(" brightness: "+str(round(self.brightness_factor,2))+' '+" contrast: "+str(round(self.contrast_factor,2))+' '+" gamma: "+str(round(self.gammaVal,2))+' ' +
+                                       " hue_min: "+str(self.hsv_hue_min)+' '+" hue_max: "+str(self.hsv_hue_max)+' '+" sat_min: "+str(self.hsv_sat_min)+' ' +
+                                       " sat_max: "+str(self.hsv_sat_max)+' '+" val_min: "+str(self.hsv_val_min)+' '+" val_max: "+str(self.hsv_val_max)+' ' +
+                                       " toggle: "+str(self.toggle_transform))
+
             # Convert back to QImage etc for displaying
             imgPIL = imgPIL.convert("RGBA")
             data = imgPIL.tobytes("raw", "RGBA")
-            qImg = QImage(data, imgPIL.size[0], imgPIL.size[1], QImage.Format_RGBA8888)
+            qImg = QImage(
+                data, imgPIL.size[0], imgPIL.size[1], QImage.Format_RGBA8888)
             self.canvas.refreshPixmap(QPixmap.fromImage(qImg))
             buf.close()
 
@@ -945,6 +1062,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.gammaVal = 1
         self.brightness_factor = 1
         self.contrast_factor = 1
+        self.hsv_hue_min = 0
+        self.hsv_hue_max = 255
+        self.hsv_sat_min = 0
+        self.hsv_sat_max = 255
+        self.hsv_val_min = 0
+        self.hsv_val_max = 255
 
         self.imgManipulate("", 0)
 
@@ -992,7 +1115,8 @@ class MainWindow(QMainWindow, WindowMixin):
         if text is not None:
             self.prevLabelText = text
             generate_color = generateColorByText(text)
-            shape = self.canvas.setLastLabel(text, generate_color, generate_color)
+            shape = self.canvas.setLastLabel(
+                text, generate_color, generate_color)
             self.addLabel(shape)
             if self.beginner():  # Switch to edit mode.
                 self.canvas.setEditing(True)
@@ -1145,7 +1269,7 @@ class MainWindow(QMainWindow, WindowMixin):
             self.image = image
             self.filePath = unicodeFilePath
 
-            #Todo: make this cleaner - Cropsy Edit
+            # Todo: make this cleaner - Cropsy Edit
 
             self.imgManipulate("", 0)
             self.canvas.shapes = []
@@ -1265,7 +1389,8 @@ class MainWindow(QMainWindow, WindowMixin):
             self.loadFile(filename)
 
     def scanAllImages(self, folderPath):
-        extensions = ['.%s' % fmt.data().decode("ascii").lower() for fmt in QImageReader.supportedImageFormats()]
+        extensions = ['.%s' % fmt.data().decode("ascii").lower()
+                      for fmt in QImageReader.supportedImageFormats()]
         images = []
 
         for root, dirs, files in os.walk(folderPath):
@@ -1305,7 +1430,8 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.filePath else '.'
         if self.usingPascalVocFormat:
             filters = "Open Annotation XML file (%s)" % ' '.join(['*.xml'])
-            filename = ustr(QFileDialog.getOpenFileName(self, '%s - Choose a xml file' % __appname__, path, filters))
+            filename = ustr(QFileDialog.getOpenFileName(
+                self, '%s - Choose a xml file' % __appname__, path, filters))
             if filename:
                 if isinstance(filename, (tuple, list)):
                     filename = filename[0]
@@ -1319,7 +1445,8 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.lastOpenDir and os.path.exists(self.lastOpenDir):
             defaultOpenDirPath = self.lastOpenDir
         else:
-            defaultOpenDirPath = os.path.dirname(self.filePath) if self.filePath else '.'
+            defaultOpenDirPath = os.path.dirname(
+                self.filePath) if self.filePath else '.'
         if silent != True:
             targetDirPath = ustr(QFileDialog.getExistingDirectory(self,
                                                                   '%s - Open Directory' % __appname__,
@@ -1418,9 +1545,12 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.mayContinue():
             return
         path = os.path.dirname(ustr(self.filePath)) if self.filePath else '.'
-        formats = ['*.%s' % fmt.data().decode("ascii").lower() for fmt in QImageReader.supportedImageFormats()]
-        filters = "Image & Label files (%s)" % ' '.join(formats + ['*%s' % LabelFile.suffix])
-        filename = QFileDialog.getOpenFileName(self, '%s - Choose Image or Label file' % __appname__, path, filters)
+        formats = ['*.%s' % fmt.data().decode("ascii").lower()
+                   for fmt in QImageReader.supportedImageFormats()]
+        filters = "Image & Label files (%s)" % ' '.join(
+            formats + ['*%s' % LabelFile.suffix])
+        filename = QFileDialog.getOpenFileName(
+            self, '%s - Choose Image or Label file' % __appname__, path, filters)
         if filename:
             if isinstance(filename, (tuple, list)):
                 filename = filename[0]
@@ -1431,7 +1561,8 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.filePath:
                 imgFileName = os.path.basename(self.filePath)
                 savedFileName = os.path.splitext(imgFileName)[0]
-                savedPath = os.path.join(ustr(self.defaultSaveDir), savedFileName)
+                savedPath = os.path.join(
+                    ustr(self.defaultSaveDir), savedFileName)
                 self._saveFile(savedPath)
         else:
             imgFileDir = os.path.dirname(self.filePath)
@@ -1458,7 +1589,8 @@ class MainWindow(QMainWindow, WindowMixin):
         if dlg.exec_():
             fullFilePath = ustr(dlg.selectedFiles()[0])
             if removeExt:
-                return os.path.splitext(fullFilePath)[0]  # Return file path without the extension.
+                # Return file path without the extension.
+                return os.path.splitext(fullFilePath)[0]
             else:
                 return fullFilePath
         return ''
@@ -1473,7 +1605,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.imageData = read(None)
             self.labelFile = None
             self.canvas.verified = False
-
 
     def _saveFile(self, annotationFilePath):
         if annotationFilePath and self.saveLabels(annotationFilePath):
